@@ -1,0 +1,196 @@
+package org.prebid.mobile.prebid_mobile_sdk_max
+
+import android.app.Activity
+import android.content.Context
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import com.applovin.mediation.MaxAd
+import com.applovin.mediation.MaxError
+import com.applovin.mediation.nativeAds.MaxNativeAdListener
+import com.applovin.mediation.nativeAds.MaxNativeAdLoader
+import com.applovin.mediation.nativeAds.MaxNativeAdView
+import com.applovin.mediation.nativeAds.MaxNativeAdViewBinder
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMessageCodec
+import io.flutter.plugin.platform.PlatformView
+import io.flutter.plugin.platform.PlatformViewFactory
+import org.prebid.mobile.NativeAdUnit
+import org.prebid.mobile.NativeAsset
+import org.prebid.mobile.NativeDataAsset
+import org.prebid.mobile.NativeImageAsset
+import org.prebid.mobile.NativeTitleAsset
+import org.prebid.mobile.PrebidMobile
+
+/**
+ * PlatformView factory for AppLovin MAX-mediated native ads. Prebid's
+ * [NativeAdUnit] runs the auction and hands demand to the MAX
+ * [MaxNativeAdLoader], which renders into a [MaxNativeAdView] bound via
+ * [MaxNativeAdViewBinder] (layout `prebid_max_native_ad`).
+ */
+internal class MaxNativeAdViewFactory(
+    private val messenger: BinaryMessenger,
+    private val activityProvider: () -> Activity?,
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+
+    override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
+        val params = args as? Map<*, *> ?: emptyMap<String, Any>()
+        return MaxNativePlatformView(
+            activityProvider() ?: context,
+            viewId,
+            messenger,
+            params,
+        )
+    }
+}
+
+/**
+ * One MAX native ad, rendered into a [MaxNativeAdView] once the Prebid
+ * [NativeAdUnit]'s auction has run. Events go to the widget over
+ * `prebid_mobile_sdk_max/native_<channelId>`.
+ */
+internal class MaxNativePlatformView(
+    private val context: Context,
+    viewId: Int,
+    messenger: BinaryMessenger,
+    params: Map<*, *>,
+) : PlatformView {
+
+    private val container = FrameLayout(context)
+    private val methodChannel: MethodChannel
+    private val nativeAdLoader: MaxNativeAdLoader
+    private val nativeAdUnit: NativeAdUnit
+    private var loadedNativeAd: MaxAd? = null
+
+    // Set once Flutter disposes the view: async SDK callbacks that land later
+    // must not load, render or report anything.
+    private var disposed = false
+
+    init {
+        val configId = params["configId"] as? String ?: ""
+        val maxAdUnitId = params["maxAdUnitId"] as? String ?: ""
+
+        methodChannel = MethodChannel(messenger, viewChannelName("prebid_mobile_sdk_max/native", params, viewId))
+
+        nativeAdLoader = MaxNativeAdLoader(maxAdUnitId, context)
+        nativeAdLoader.setNativeAdListener(object : MaxNativeAdListener() {
+            override fun onNativeAdLoaded(nativeAdView: MaxNativeAdView?, ad: MaxAd) {
+                if (disposed) {
+                    nativeAdLoader.destroy(ad)
+                    return
+                }
+                loadedNativeAd?.let { nativeAdLoader.destroy(it) }
+                loadedNativeAd = ad
+                container.removeAllViews()
+                if (nativeAdView != null) {
+                    container.addView(
+                        nativeAdView,
+                        FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ),
+                    )
+                }
+                methodChannel.invokeMethod("onAdLoaded", null)
+                if (nativeAdView != null) reportContentHeight(nativeAdView)
+            }
+
+            override fun onNativeAdLoadFailed(adUnitId: String, error: MaxError) {
+                methodChannel.invokeMethod("onAdFailed", failure(error.message))
+            }
+
+            override fun onNativeAdClicked(ad: MaxAd) {
+                methodChannel.invokeMethod("onAdClicked", null)
+            }
+        })
+
+        // MAX reports revenue when the impression is recorded.
+        nativeAdLoader.setRevenueListener { ad ->
+            methodChannel.invokeMethod("onAdImpression", null)
+            methodChannel.invokeMethod("onAdRevenuePaid", revenuePayload(ad))
+        }
+
+        nativeAdUnit = NativeAdUnit(configId)
+        configureNativeAdUnit(nativeAdUnit, params)
+
+        if (PrebidMobile.isSdkInitialized()) {
+            nativeAdUnit.fetchDemand(nativeAdLoader) {
+                if (!disposed) nativeAdLoader.loadAd(createNativeAdView())
+            }
+        } else {
+            // Prebid Android drops requests made before init without calling
+            // back: report it instead of leaving the slot empty and silent.
+            methodChannel.invokeMethod("onAdFailed", failure(PluginErrors.NOT_INITIALIZED))
+        }
+    }
+
+    /**
+     * Measures the content's natural height (the container is clamped to the
+     * current Flutter-side size, so its own height would only echo that) and
+     * reports it in logical pixels.
+     */
+    private fun reportContentHeight(content: View) {
+        container.post {
+            if (disposed) return@post
+            val h = naturalHeight(content, container.width)
+            if (h > 0) methodChannel.invokeMethod("onAdSize", mapOf("height" to h))
+        }
+    }
+
+    private fun createNativeAdView(): MaxNativeAdView {
+        val binder = MaxNativeAdViewBinder.Builder(R.layout.prebid_max_native_ad)
+            .setTitleTextViewId(R.id.prebid_native_title)
+            .setBodyTextViewId(R.id.prebid_native_body)
+            .setIconImageViewId(R.id.prebid_native_icon)
+            .setMediaContentViewGroupId(R.id.prebid_native_media)
+            .setCallToActionButtonId(R.id.prebid_native_cta)
+            .build()
+        return MaxNativeAdView(binder, context)
+    }
+
+    private fun configureNativeAdUnit(nativeAdUnit: NativeAdUnit, params: Map<*, *>) {
+        NativeContext.from(params).applyTo(nativeAdUnit)
+        NativeRequestOptions(params).applyTo(nativeAdUnit)
+        (params["impOrtbConfig"] as? String)?.let { nativeAdUnit.setImpOrtbConfig(it) }
+        (params["globalOrtbConfig"] as? String)?.let { nativeAdUnit.setGlobalOrtbConfig(it) }
+
+        (nativeAssetsFrom(params["assets"]) ?: defaultAssets()).forEach { nativeAdUnit.addAsset(it) }
+        (nativeTrackersFrom(params["eventTrackers"]) ?: defaultNativeTrackers())
+            .forEach { nativeAdUnit.addEventTracker(it) }
+    }
+
+    /** Prebid's reference request: title, icon, sponsored, body and call to action. */
+    private fun defaultAssets(): List<NativeAsset> = listOf(
+        NativeTitleAsset().apply {
+            setLength(90)
+            isRequired = true
+        },
+        NativeImageAsset(20, 20, 20, 20).apply {
+            imageType = NativeImageAsset.IMAGE_TYPE.ICON
+            isRequired = true
+        },
+        NativeDataAsset().apply {
+            dataType = NativeDataAsset.DATA_TYPE.SPONSORED
+            isRequired = true
+        },
+        NativeDataAsset().apply {
+            dataType = NativeDataAsset.DATA_TYPE.DESC
+            isRequired = true
+        },
+        NativeDataAsset().apply {
+            dataType = NativeDataAsset.DATA_TYPE.CTATEXT
+            isRequired = true
+        },
+    )
+
+    override fun getView(): View = container
+
+    override fun dispose() {
+        disposed = true
+        loadedNativeAd?.let { nativeAdLoader.destroy(it) }
+        loadedNativeAd = null
+        nativeAdLoader.destroy()
+        nativeAdUnit.destroy()
+    }
+}

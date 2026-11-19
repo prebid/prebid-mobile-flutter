@@ -1,0 +1,111 @@
+import Flutter
+import UIKit
+
+/// Formats Prebid errors, appending `localizedFailureReason` (the real server
+/// response) which the SDK hides behind a generic `localizedDescription`.
+enum PrebidErrorFormatter {
+    static func describe(_ error: Error?) -> String {
+        guard let error = error else { return "Unknown error" }
+        let nsError = error as NSError
+        let description = nsError.localizedDescription
+        if let reason = nsError.localizedFailureReason,
+            !reason.isEmpty,
+            reason != description
+        {
+            return "\(description): \(reason)"
+        }
+        return description
+    }
+}
+
+/// Finds the view controller to present fullscreen ads from: the top-most
+/// presented controller of the foreground key window (scene-aware;
+/// `UIApplication.keyWindow` is deprecated and nil in multi-scene apps).
+enum PrebidPresenter {
+    /// The top-most presented controller of `window` (the Flutter engine's
+    /// own, or the ad view's, so a multi-window iPad or an add-to-app
+    /// secondary scene presents in the right place), or of the foreground
+    /// key window when `window` is nil or has no root.
+    static func topViewController(in window: UIWindow? = nil) -> UIViewController? {
+        var top = window?.rootViewController ?? keyWindow()?.rootViewController
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed {
+            top = presented
+        }
+        return top
+    }
+
+    private static func keyWindow() -> UIWindow? {
+        // Prefer the active scene, but fall back to an inactive one: the
+        // scene is inactive while a system alert (e.g. ATT) or Notification
+        // Center is over the app, and when returning from the background.
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let windows =
+            (scenes.filter { $0.activationState == .foregroundActive }
+            + scenes.filter { $0.activationState == .foregroundInactive })
+            .flatMap { $0.windows }
+        return windows.first { $0.isKeyWindow } ?? windows.first
+    }
+
+    /// Calls `present` with a controller that can present now, or `fail`
+    /// with the reason. A controller still presenting or dismissing another
+    /// makes UIKit drop the presentation with only a console warning, after
+    /// Prebid has already reported the ad as displayed; so that case waits
+    /// once for the running transition (or the next run loop), then fails.
+    static func whenReady(
+        in window: UIWindow? = nil,
+        retry: Bool = true,
+        fail: @escaping (String) -> Void,
+        present: @escaping (UIViewController) -> Void
+    ) {
+        guard let top = topViewController(in: window) else { return fail(noViewController) }
+        guard isBusy(top) else { return present(top) }
+        guard retry else { return fail(busy) }
+        var retried = false
+        let again = {
+            guard !retried else { return }
+            retried = true
+            DispatchQueue.main.async {
+                PrebidPresenter.whenReady(in: window, retry: false, fail: fail, present: present)
+            }
+        }
+        // UIKit doesn't call the completion when it can't queue it (false).
+        let queued =
+            (top.presentedViewController ?? top).transitionCoordinator?
+            .animate(alongsideTransition: nil) { _ in again() } ?? false
+        if !queued { again() }
+    }
+
+    private static func isBusy(_ controller: UIViewController) -> Bool {
+        controller.presentedViewController != nil
+            || controller.isBeingPresented
+            || controller.isBeingDismissed
+    }
+
+    static let noViewController = "No view controller to present the ad from"
+    static let notReady = "The ad is not loaded"
+    static let busy = "Another view controller is being presented; try again after it is dismissed"
+}
+
+/// Keeps ad units alive while `fetchDemand` runs. Prebid guards its response
+/// and timeout handlers with `[weak self]`, so releasing the unit mid-request
+/// (destroy, or a new fetch for the same ad) drops the completion and leaves
+/// the Dart Future pending. Not captured in the completion itself: the unit
+/// stores it (`lastFetchDemandCompletion`), which would be a retain cycle.
+enum InFlightAdUnits {
+    private static var units: [ObjectIdentifier: AnyObject] = [:]
+
+    static func retain(_ unit: AnyObject) {
+        units[ObjectIdentifier(unit)] = unit
+    }
+
+    static func release(_ id: ObjectIdentifier) {
+        units.removeValue(forKey: id)
+    }
+}
+
+extension AdFlutterApi {
+    /// Reports `onAdFailed` with [error] for [adId].
+    func sendAdFailed(_ adId: Int64, _ error: String) {
+        onAdEvent(event: AdEvent(adId: adId, eventName: "onAdFailed", error: error)) { _ in }
+    }
+}
