@@ -1,0 +1,52 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+# Libraries should not include pubspec.lock, per https://dart.dev/guides/libraries/private-files#pubspeclock.
+# In a pub workspace a single lock is generated at the repo root; ignore it and
+# any stray per-package locks.
+pubspec.lock
+**/doc/api/
+.dart_tool/
+.flutter-plugins-dependencies
+build/
+coverage/
+# Written by DevTools; commit it once the repo enables a DevTools extension.
+devtools_options.yaml
+
+# Swift Package Manager (resolved by the consuming app, not the plugin)
+.build/
+Package.resolved
+.swiftpm/
+
+# FVM Version Cache
+.fvm/
+
+# Android / Gradle build caches (all packages)
+.gradle/
+.cxx/
+local.properties
+# Android Studio's daemon JVM criteria; CI and the Flutter CLI pick the JDK.
+gradle-daemon-jvm.properties

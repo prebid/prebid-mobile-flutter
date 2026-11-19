@@ -1,0 +1,78 @@
+package org.prebid.mobile.prebid_mobile_sdk_admob
+
+import android.app.Activity
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+
+/**
+ * Companion plugin that adds Google AdMob mediation on top of the core
+ * prebid_mobile_sdk plugin. Registers the AdMob banner and native platform
+ * views and the interstitial and rewarded method channels.
+ */
+class PrebidMobileSdkAdmobPlugin :
+    FlutterPlugin,
+    ActivityAware {
+
+    private var activity: Activity? = null
+    private var interstitialManager: AdMobInterstitialManager? = null
+    private var rewardedManager: AdMobRewardedManager? = null
+    private var preloadedBanners: PreloadedBanners? = null
+
+    override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        val preloaded =
+            PreloadedBanners(binding.binaryMessenger, "prebid_mobile_sdk_admob/preloaded_banner") { channelId, params ->
+                AdMobBannerPlatformView(
+                    activity ?: binding.applicationContext,
+                    channelId.toInt(),
+                    binding.binaryMessenger,
+                    params,
+                )
+            }
+        preloadedBanners = preloaded
+        binding.platformViewRegistry.registerViewFactory(
+            "prebid_mobile_sdk_admob/banner",
+            AdMobBannerAdViewFactory(binding.binaryMessenger, preloaded) { activity },
+        )
+        binding.platformViewRegistry.registerViewFactory(
+            "prebid_mobile_sdk_admob/native",
+            AdMobNativeAdViewFactory(binding.binaryMessenger),
+        )
+        interstitialManager = AdMobInterstitialManager(binding.binaryMessenger) { activity }
+        rewardedManager = AdMobRewardedManager(binding.binaryMessenger) { activity }
+    }
+
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        preloadedBanners?.dispose()
+        preloadedBanners = null
+        // Flutter disposes the platform views itself; the fullscreen ads
+        // would otherwise outlive the engine.
+        interstitialManager?.dispose()
+        interstitialManager = null
+        rewardedManager?.dispose()
+        rewardedManager = null
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activity = null
+        // As the core plugin: the ads hold the Activity, which is destroyed.
+        interstitialManager?.releaseAll(PluginErrors.ACTIVITY_RECREATED)
+        rewardedManager?.releaseAll(PluginErrors.ACTIVITY_RECREATED)
+    }
+
+    override fun onDetachedFromActivity() {
+        activity = null
+        // Fullscreen ads hold the Activity they were built with; release them
+        // with it, as the core plugin does.
+        interstitialManager?.releaseAll(PluginErrors.ACTIVITY_DESTROYED)
+        rewardedManager?.releaseAll(PluginErrors.ACTIVITY_DESTROYED)
+    }
+}

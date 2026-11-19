@@ -1,0 +1,91 @@
+name: prebid_mobile_sdk_example
+description: "Demonstrates how to use the prebid_mobile_sdk plugin."
+version: 1.0.0+1
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# Part of the pub workspace at the repo root (see /pubspec.yaml).
+resolution: workspace
+
+environment:
+  sdk: ^3.12.0
+
+# Dependencies specify other packages that your package needs in order to work.
+# To automatically upgrade your package dependencies to the latest versions
+# consider running `flutter pub upgrade --major-versions`. Alternatively,
+# dependencies can be manually updated by changing the version numbers below to
+# the latest version available on pub.dev. To see which dependencies have newer
+# versions available, run `flutter pub outdated`.
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Path dependencies on the sibling workspace packages.
+  prebid_mobile_sdk:
+    path: ../packages/prebid_mobile_sdk
+
+  # Optional companion: Google Ad Manager rendering (GAM event handlers).
+  prebid_mobile_sdk_gam:
+    path: ../packages/prebid_mobile_sdk_gam
+
+  # Optional companion: Google AdMob mediation (AdMob adapters).
+  prebid_mobile_sdk_admob:
+    path: ../packages/prebid_mobile_sdk_admob
+
+  # Optional companion: AppLovin MAX mediation (MAX adapters).
+  prebid_mobile_sdk_max:
+    path: ../packages/prebid_mobile_sdk_max
+
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^2.0.0
+  shared_preferences: ^2.5.6
+  url_launcher: ^6.3.3
+  google_mobile_ads: ^9.1.0
+  applovin_max: ^4.6.4
+  webview_flutter: ^4.14.1
+  interactive_media_ads: ^0.3.0+18
+  video_player: ^2.14.1
+
+dev_dependencies:
+  integration_test:
+    sdk: flutter
+  flutter_test:
+    sdk: flutter
+
+  # The "flutter_lints" package below contains a set of recommended lints to
+  # encourage good coding practices. The lint set provided by the package is
+  # activated in the `analysis_options.yaml` file located at the root of your
+  # package. See that file for information about deactivating specific lint
+  # rules and activating additional ones.
+  flutter_lints: ^6.0.0
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter packages.
+flutter:
+  uses-material-design: true
+
+  # applovin_max has no Swift Package Manager support, so it comes through
+  # CocoaPods with its own AppLovinSDK; with SPM on, prebid_mobile_sdk_max
+  # would add a second copy through SPM ("Multiple commands produce
+  # AppLovinSDK.framework"). CocoaPods for every plugin keeps one copy.
+  config:
+    enable-swift-package-manager: false
+
+  # The bundled typefaces, bundled (no runtime font fetching). Both are
+  # variable fonts; lib/theme/app_theme.dart maps FontWeight to the `wght` axis.
+  # Licenses (SIL OFL 1.1) are registered with LicenseRegistry in main.dart.
+  assets:
+    - assets/fonts/OFL-RethinkSans.txt
+    - assets/fonts/OFL-JetBrainsMono.txt
+
+  fonts:
+    - family: Rethink Sans
+      fonts:
+        - asset: assets/fonts/RethinkSans-Variable.ttf
+    - family: JetBrains Mono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Variable.ttf

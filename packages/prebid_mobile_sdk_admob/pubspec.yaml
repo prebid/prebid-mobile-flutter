@@ -1,0 +1,41 @@
+name: prebid_mobile_sdk_admob
+description: "Google AdMob mediation for prebid_mobile_sdk, via Prebid's AdMob adapters. Optional companion package."
+version: 1.1.0
+homepage: https://github.com/prebid/prebid-mobile-flutter
+repository: https://github.com/prebid/prebid-mobile-flutter/tree/main/packages/prebid_mobile_sdk_admob
+issue_tracker: https://github.com/prebid/prebid-mobile-flutter/issues
+documentation: https://github.com/prebid/prebid-mobile-flutter/blob/main/docs/guides/admob.md
+
+topics:
+  - ads
+  - prebid
+  - admob
+  - mediation
+  - header-bidding
+
+resolution: workspace
+
+environment:
+  sdk: ^3.12.0
+  flutter: '>=3.44.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Core Prebid plugin. Inside the pub workspace this resolves to the local
+  # packages/prebid_mobile_sdk.
+  prebid_mobile_sdk: ^1.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: org.prebid.mobile.prebid_mobile_sdk_admob
+        pluginClass: PrebidMobileSdkAdmobPlugin
+      ios:
+        pluginClass: PrebidMobileSdkAdmobPlugin

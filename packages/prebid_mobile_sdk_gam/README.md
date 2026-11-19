@@ -1,0 +1,235 @@
+# prebid_mobile_sdk_gam
+
+
+Google Ad Manager (GAM) **rendering** for the [`prebid_mobile_sdk`](https://pub.dev/packages/prebid_mobile_sdk) Flutter
+plugin, via Prebid's GAM event handlers.
+
+**Guides:** [Integration guides](../../docs/guides/index.md)
+
+Prebid runs the auction and lets **Google Ad Manager render** the ad: a winning
+Prebid bid is served through a GAM line item + the Prebid Universal Creative,
+and direct-sold GAM demand competes in the same auction. This differs from:
+
+- **Core `prebid_mobile_sdk` (In-App / Prebid Rendered)** — the Prebid SDK
+  renders the ad itself.
+- **Original API keyword handoff** — Prebid returns keywords and you pass them
+  to `google_mobile_ads` yourself (see the core plugin's
+  `PrebidBannerAdUnit` / `PrebidInterstitialAdUnit`).
+
+This is a **separate package** because it bundles the Google Mobile Ads SDK
+natively. Apps that only use Prebid In-App rendering should not depend on it and
+are not forced to declare a GAM app ID.
+
+## Install
+
+```yaml
+dependencies:
+  prebid_mobile_sdk: ^1.1.0
+  prebid_mobile_sdk_gam: ^1.1.0
+```
+
+### Native configuration (required)
+
+The Google Mobile Ads SDK requires a GAM/AdMob app ID or the app crashes at
+startup:
+
+- **Android** — in `AndroidManifest.xml`:
+  ```xml
+  <meta-data
+      android:name="com.google.android.gms.ads.APPLICATION_ID"
+      android:value="ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy" />
+  ```
+- **iOS** — in `ios/Runner/Info.plist`:
+  ```xml
+  <key>GADApplicationIdentifier</key>
+  <string>ca-app-pub-xxxxxxxxxxxxxxxx~yyyyyyyyyy</string>
+  ```
+
+Initialize the Google Mobile Ads SDK once at startup (e.g. via the
+`google_mobile_ads` package):
+
+```dart
+await MobileAds.instance.initialize();
+```
+
+If your app also depends on `google_mobile_ads`, use **8.0.0 or later**: older
+releases pin Google Mobile Ads iOS SDK 12, while Prebid's GAM event handlers need 13.x,
+so CocoaPods can't resolve both.
+
+In Google Ad Manager, configure Prebid line items/creatives that target the
+`hb_*` keys so a winning Prebid bid renders.
+
+## Compatibility
+
+<!-- compatibility:start -->
+<!-- Generated from tool/compatibility.json by tool/sync_compatibility.mjs. Do not edit. -->
+
+| prebid_mobile_sdk_gam | Prebid Android (`prebid-mobile-sdk-gam-event-handlers`) | Prebid iOS (`PrebidMobileGAMEventHandlers`) | Google Mobile Ads Android | Google Mobile Ads iOS | Tested with |
+| --- | --- | --- | --- | --- | --- |
+| 1.1.0 | `3.4.1` | `>= 3.4.1, < 4.0` | `play-services-ads 25.5.0` | `Google-Mobile-Ads-SDK >= 13.0.0` | `google_mobile_ads ^9.1.0` |
+| 1.0.0 | `3.4.0` | `>= 3.4.1, < 4.0` | `play-services-ads 25.5.0` | `Google-Mobile-Ads-SDK >= 13.0.0` | `google_mobile_ads ^9.1.0` |
+
+Also requires the matching core `prebid_mobile_sdk` release. Android resolves exactly the listed Prebid version. On iOS, CocoaPods and Swift Package Manager pick the newest PrebidMobile release in the range, so a fresh `pod install` can resolve a newer 3.x patch.
+
+<!-- compatibility:end -->
+
+## Usage
+
+### Banner
+
+```dart
+import 'package:prebid_mobile_sdk_gam/prebid_mobile_sdk_gam.dart';
+
+PrebidGamBannerAd(
+  configId: 'prebid-demo-banner-320-50',
+  gamAdUnitId: '/21808260008/prebid_oxb_320x50_banner',
+  width: 320,
+  height: 50,
+  listener: PrebidBannerAdListener(
+    onAdLoaded: () => debugPrint('GAM banner loaded'),
+  ),
+);
+```
+
+In a scrolling list, `PrebidGamPreloadedBannerAd` loads the banner before its slot is on screen and `PrebidGamPreloadedBannerAdView` shows it, keeping it across views instead of re-auctioning ([guide](../../docs/guides/gam.md#preloaded-banner-feeds)).
+
+### Interstitial
+
+```dart
+final interstitial = PrebidGamInterstitialAd(
+  configId: 'prebid-demo-display-interstitial-320-480',
+  gamAdUnitId: '/21808260008/prebid_oxb_html_interstitial',
+  listener: PrebidInterstitialAdListener(
+    onAdLoaded: () => interstitial.show(),
+    onAdClosed: () => interstitial.destroy(),
+  ),
+);
+await interstitial.loadAd();
+```
+
+### Rewarded
+
+```dart
+final rewarded = PrebidGamRewardedAd(
+  configId: 'prebid-demo-video-rewarded-320-480',
+  gamAdUnitId: '/21808260008/prebid_oxb_rewarded_video',
+  listener: PrebidRewardedAdListener(
+    onAdLoaded: () => rewarded.show(),
+    onUserEarnedReward: (reward) => debugPrint('${reward.count} ${reward.type}'),
+    onAdClosed: () => rewarded.destroy(),
+  ),
+);
+await rewarded.loadAd();
+```
+
+### Native (Original API: custom template + unified)
+
+```dart
+PrebidGamNativeAd(
+  configId: 'prebid-demo-banner-native-styles',
+  gamAdUnitId: '/21808260008/apollo_custom_template_native_ad_unit',
+  customFormatId: '11934135',
+  listener: PrebidGamNativeAdListener(
+    onNativeAdLoaded: () => debugPrint('Prebid native rendered'),
+    onPrimaryAdWinUnified: () => debugPrint('GAM native won'),
+    onAdImpression: () => debugPrint('impression'),
+  ),
+);
+```
+
+Pass `nativeParameters` (the core's `NativeParameters`) to change the
+requested assets, event trackers, context or request options (the default
+assets are title, icon, main image, sponsored, description and call to
+action). The native ad also takes `customTargeting` (added to the GAM
+request), `gpid`, `pbAdSlot`, `impOrtbConfig` and `globalOrtbConfig`.
+
+For a Prebid creative, `onAdImpression` is Prebid's own impression-tracker
+callback: it fires once Prebid's impression tracker request succeeds. That
+differs from the core `PrebidNativeAdView`, whose impression is
+viewability-based. For a GAM unified ad it is the Google Mobile Ads
+impression.
+
+### GAM request targeting and banner controls
+
+Banner, interstitial, rewarded and native take `customTargeting`, added to the GAM
+request (Prebid's `hb_*` keys win on conflict). `PrebidGamBannerAd` also takes
+a `PrebidBannerAdController` (`loadAd()` with `autoLoad: false`,
+`stopRefresh()`), `videoPlacementType` and a `PrebidBannerVideoListener` for
+outstream video events. Banner auto-refresh is off unless
+`refreshIntervalSeconds` is positive (`null` / `0` disable it on both
+platforms).
+
+The banner also mirrors the core `PrebidBannerAd` request options:
+
+| Parameter | Description |
+|---|---|
+| `additionalSizes` | Extra sizes besides `width` x `height` (multisize). All sizes go to the GAM event handler as valid ad sizes and Prebid requests them all. |
+| `adFormats` | `{PrebidAdFormat.banner, PrebidAdFormat.video}` for a multiformat banner (Prebid 3.4); overrides `isVideo`. |
+| `pbAdSlot` | Prebid ad slot (`imp.ext.data.pbadslot`). |
+| `impOrtbConfig` | Impression-level OpenRTB JSON merged into the `imp`. |
+| `videoParameters` | OpenRTB video parameters for outstream video. **iOS only** — Prebid Android's `BannerView` has no video-parameters setter. |
+
+`show()` on an interstitial / rewarded ad that is not loaded yet ("The ad is
+not loaded"), or when no foreground Activity / view controller is available,
+reports `onAdFailed` instead of failing silently; `isLoaded` turns false after
+`show()`, `onAdClosed`, `onAdFailed` and `onAdExpired`. The interstitial takes
+`isVideo` to request a video creative (`adFormats` overrides it).
+
+On Android, Prebid drops a request made before the Prebid SDK finished
+initializing. A banner, interstitial or rewarded ad loaded that early reports
+`onAdFailed` ("The Prebid SDK is not initialized") instead of never
+answering; the native ad reports `onFetchDemandFailed('prebidSdkNotInitialized')`
+and still requests the GAM ad.
+
+`PrebidBannerAdListener`, `PrebidInterstitialAdListener`,
+`PrebidRewardedAdListener`, `PrebidFullscreenControls`, `NativeAsset` and
+`NativeEventTracker` come from the core
+[`prebid_mobile_sdk`](https://pub.dev/packages/prebid_mobile_sdk) package.
+
+### Fullscreen controls
+
+Interstitial and rewarded ads accept Prebid's rendering controls (close / skip
+button area and position, skip delay, mute, sound button, minimum size):
+
+```dart
+controls: const PrebidFullscreenControls(
+  closeButtonPosition: PrebidButtonPosition.topLeft,
+  skipDelay: 5,
+  isMuted: true,
+),
+```
+
+Skip controls apply to interstitials (and to rewarded on Android only);
+`isAutoCloseOnCompletionEnabled` and `supportSKOverlay` (present an SKOverlay
+for SKAdNetwork ads) are iOS only.
+
+### Video parameters
+
+Interstitial and rewarded ads take `videoParameters` (the core
+`VideoParameters`: mimes, protocols, playback methods, `plcmt`, start delay,
+linearity, skippable, `battr`, bitrates, durations, API frameworks):
+
+```dart
+videoParameters: const VideoParameters(
+  mimes: ['video/mp4'],
+  plcmt: VideoPlcmt.interstitial,
+  maxDuration: 30,
+),
+```
+
+iOS sends every field. Prebid Android's rendering interstitial / rewarded ad
+units only expose `setMaxVideoDuration`, which caps the rendered video's length
+but isn't sent in the request.
+
+## API
+
+| Class | Description |
+|---|---|
+| `PrebidGamBannerAd` | Banner widget; GAM renders. Resizes to the rendered creative. `additionalSizes`, `adFormats`, `adPosition`, `pbAdSlot`, `impOrtbConfig`, `videoParameters` (iOS), controller, video events, `onAdExpired`. |
+| `PrebidGamInterstitialAd` | Interstitial with `loadAd()` / `show()` / `destroy()`, `isVideo`, `adFormats`, `controls`, `videoParameters`, `impOrtbConfig`. |
+| `PrebidGamRewardedAd` | Rewarded with `loadAd()` / `show()` / `destroy()`, reward incl. `ext`, `controls`, `videoParameters`, `impOrtbConfig`. |
+| `PrebidGamNativeAd` | Native widget for the GAM Original-API flow; `nativeParameters`, `customTargeting`, `gpid`, `pbAdSlot`, `impOrtbConfig`, `globalOrtbConfig`; events via `PrebidGamNativeAdListener`. |
+
+## License
+
+[MIT License](LICENSE)
