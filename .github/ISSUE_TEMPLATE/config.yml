@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/prebid/prebid-mobile-flutter/tree/main/docs/guides
+    about: Markdown guides for Flutter integrations and platform differences.
+  - name: Prebid Server, bidders and the native Prebid SDKs
+    url: https://docs.prebid.org/prebid-mobile/prebid-mobile-getting-started.html
+    about: Questions about Prebid Server, bidders and native SDK behavior belong in the relevant Prebid project.
+  - name: Report a security vulnerability
+    url: https://github.com/prebid/prebid-mobile-flutter/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue.

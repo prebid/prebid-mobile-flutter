@@ -1,0 +1,34 @@
+name: Set up Flutter
+description: >-
+  Installs the Flutter version pinned in .fvmrc (the same SDK developers use
+  through FVM) and resolves the pub workspace.
+
+runs:
+  using: composite
+  steps:
+    - name: Read Flutter version from .fvmrc
+      id: version
+      shell: bash
+      run: echo "flutter=$(jq -r .flutter .fvmrc)" >> "$GITHUB_OUTPUT"
+
+    - name: Install Flutter ${{ steps.version.outputs.flutter }}
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ steps.version.outputs.flutter }}
+        channel: stable
+        cache: true
+        # Its pub cache keys on hashFiles('**/pubspec.lock'), which its post
+        # step re-evaluates over the whole workspace: after an iOS build
+        # (Pods, build outputs) that exceeds the 120 s limit and fails the job.
+        pub-cache: false
+
+    - name: Cache pub dependencies
+      uses: actions/cache@v6
+      with:
+        path: ~/.pub-cache
+        key: pub-${{ runner.os }}-${{ hashFiles('pubspec.yaml', 'packages/*/pubspec.yaml', 'example/pubspec.yaml') }}
+        restore-keys: pub-${{ runner.os }}-
+
+    - name: Resolve workspace dependencies
+      shell: bash
+      run: flutter pub get

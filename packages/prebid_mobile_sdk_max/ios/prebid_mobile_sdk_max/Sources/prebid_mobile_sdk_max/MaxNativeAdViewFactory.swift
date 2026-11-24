@@ -1,0 +1,202 @@
+import AppLovinSDK
+import Flutter
+import PrebidMobile
+import PrebidMobileMAXAdapters
+import UIKit
+
+/// PlatformView factory for AppLovin MAX-mediated native ads. The rendered view
+/// is a `MANativeAdView` with tag-bound asset views that the MAX SDK populates;
+/// Prebid's `MediationNativeAdUnit` runs the auction via the Prebid native
+/// adapter. Rendering through the SDK's native view keeps tracking intact.
+final class MaxNativeAdViewFactory: NSObject, FlutterPlatformViewFactory {
+
+    private let messenger: FlutterBinaryMessenger
+
+    init(messenger: FlutterBinaryMessenger) {
+        self.messenger = messenger
+        super.init()
+    }
+
+    func create(
+        withFrame frame: CGRect,
+        viewIdentifier viewId: Int64,
+        arguments args: Any?
+    ) -> FlutterPlatformView {
+        return MaxNativePlatformView(
+            viewId: viewId,
+            messenger: messenger,
+            args: args as? [String: Any] ?? [:]
+        )
+    }
+
+    func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+        return FlutterStandardMessageCodec.sharedInstance()
+    }
+}
+
+/// One MAX native ad, rendered into a tag-bound `MANativeAdView` once the
+/// Prebid `MediationNativeAdUnit`'s auction has run. Events go to the widget
+/// over `prebid_mobile_sdk_max/native_<channelId>`.
+final class MaxNativePlatformView: NSObject, FlutterPlatformView, MANativeAdDelegate, MAAdRevenueDelegate {
+
+    private let container = NativeAdContainer()
+    private let methodChannel: FlutterMethodChannel
+
+    private var nativeAdLoader: MANativeAdLoader?
+    private var mediationDelegate: MAXMediationNativeUtils?
+    private var adUnit: MediationNativeAdUnit?
+    // Held strongly so it can be destroyed when replaced or when the view goes
+    // away (MAX keeps native ad resources alive until `destroy`).
+    private var loadedNativeAd: MAAd?
+
+    init(viewId: Int64, messenger: FlutterBinaryMessenger, args: [String: Any]) {
+        let configId = args["configId"] as? String ?? ""
+        let maxAdUnitId = args["maxAdUnitId"] as? String ?? ""
+
+        methodChannel = viewChannel(
+            "prebid_mobile_sdk_max/native", args: args, viewId: viewId, messenger: messenger
+        )
+
+        super.init()
+        container.onHeight = { [weak self] height in self?.send("onAdSize", arguments: ["height": Double(height)]) }
+
+        // 1. MAX native ad loader + Prebid mediation utils + ad unit.
+        let loader = MANativeAdLoader(adUnitIdentifier: maxAdUnitId)
+        loader.nativeAdDelegate = self
+        loader.revenueDelegate = self
+        nativeAdLoader = loader
+
+        let mediationDelegate = MAXMediationNativeUtils(nativeAdLoader: loader)
+        self.mediationDelegate = mediationDelegate
+        let adUnit = MediationNativeAdUnit(
+            configId: configId,
+            mediationDelegate: mediationDelegate
+        )
+        configureMediationNative(adUnit, args: args)
+        self.adUnit = adUnit
+
+        let adView = buildNativeAdView()
+
+        adUnit.fetchDemand { [weak self] _ in
+            self?.nativeAdLoader?.loadAd(into: adView)
+        }
+    }
+
+    func view() -> UIView {
+        return container
+    }
+
+    // iOS platform views have no dispose callback; release the ad on dealloc.
+    deinit {
+        if let ad = loadedNativeAd {
+            nativeAdLoader?.destroy(ad)
+        }
+    }
+
+    /// Builds a `MANativeAdView` with tagged asset subviews and binds them.
+    private func buildNativeAdView() -> MANativeAdView {
+        let iconView = UIImageView()
+        iconView.tag = 1
+        iconView.contentMode = .scaleAspectFit
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = UILabel()
+        titleLabel.tag = 2
+        titleLabel.font = .boldSystemFont(ofSize: 15)
+
+        let advertiserLabel = UILabel()
+        advertiserLabel.tag = 4
+        advertiserLabel.font = .systemFont(ofSize: 11)
+        advertiserLabel.textColor = .gray
+
+        let bodyLabel = UILabel()
+        bodyLabel.tag = 3
+        bodyLabel.font = .systemFont(ofSize: 13)
+        bodyLabel.numberOfLines = 3
+        bodyLabel.textColor = .gray
+
+        let ctaButton = UIButton(type: .system)
+        ctaButton.tag = 5
+        ctaButton.titleLabel?.font = .boldSystemFont(ofSize: 14)
+
+        let mediaView = UIView()
+        mediaView.tag = 123
+
+        let titles = UIStackView(arrangedSubviews: [titleLabel, advertiserLabel])
+        titles.axis = .vertical
+        let header = UIStackView(arrangedSubviews: [iconView, titles])
+        header.axis = .horizontal
+        header.spacing = 8
+        header.alignment = .center
+        NSLayoutConstraint.activate([
+            iconView.widthAnchor.constraint(equalToConstant: 40),
+            iconView.heightAnchor.constraint(equalToConstant: 40),
+        ])
+
+        let stack = UIStackView(arrangedSubviews: [header, bodyLabel, mediaView, ctaButton])
+        stack.axis = .vertical
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.isLayoutMarginsRelativeArrangement = true
+        stack.layoutMargins = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+
+        // Asset views stay inside the stack; the binder resolves them by tag via
+        // `viewWithTag`, which searches the whole subtree.
+        let adView = MANativeAdView()
+        adView.addSubview(stack)
+        adView.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(adView)
+        NSLayoutConstraint.activate([
+            adView.topAnchor.constraint(equalTo: container.topAnchor),
+            adView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            adView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            adView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            stack.topAnchor.constraint(equalTo: adView.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: adView.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: adView.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: adView.bottomAnchor),
+        ])
+
+        let binder = MANativeAdViewBinder(builderBlock: { builder in
+            builder.iconImageViewTag = 1
+            builder.titleLabelTag = 2
+            builder.bodyLabelTag = 3
+            builder.advertiserLabelTag = 4
+            builder.callToActionButtonTag = 5
+            builder.mediaContentViewTag = 123
+        })
+        adView.bindViews(with: binder)
+        return adView
+    }
+
+    // MARK: - MANativeAdDelegate
+
+    func didLoadNativeAd(_ nativeAdView: MANativeAdView?, for ad: MAAd) {
+        if let previous = loadedNativeAd {
+            nativeAdLoader?.destroy(previous)
+        }
+        loadedNativeAd = ad
+        send("onAdLoaded", arguments: nil)
+        container.reportHeight()
+    }
+
+    func didFailToLoadNativeAd(forAdUnitIdentifier adUnitIdentifier: String, withError error: MAError) {
+        send("onAdFailed", arguments: failure(PrebidErrorFormatter.describe(error)))
+    }
+
+    // MAX reports revenue when the impression is recorded.
+    func didPayRevenue(for ad: MAAd) {
+        send("onAdImpression", arguments: nil)
+        send("onAdRevenuePaid", arguments: revenuePayload(ad))
+    }
+
+    func didClickNativeAd(_ ad: MAAd) {
+        send("onAdClicked", arguments: nil)
+    }
+
+    /// Calls the widget on the main thread.
+    private func send(_ method: String, arguments: Any?) {
+        onMain { [methodChannel] in methodChannel.invokeMethod(method, arguments: arguments) }
+    }
+}

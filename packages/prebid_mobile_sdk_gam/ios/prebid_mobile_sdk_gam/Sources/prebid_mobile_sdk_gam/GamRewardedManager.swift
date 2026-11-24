@@ -1,0 +1,37 @@
+import Flutter
+import PrebidMobile
+import PrebidMobileGAMEventHandlers
+import UIKit
+
+/// GAM-rendered rewarded ads over the `prebid_mobile_sdk_gam/rewarded` method
+/// channel.
+final class GamRewardedManager: GamFullscreenAdManager {
+
+    init(messenger: FlutterBinaryMessenger) {
+        super.init(name: "prebid_mobile_sdk_gam/rewarded", messenger: messenger)
+    }
+
+    override func makeAdUnit(_ args: [String: Any], delegate: GamFullscreenEvents) -> GamFullscreenAdUnit {
+        let configId = args["configId"] as? String ?? ""
+        let gamAdUnitId = args["gamAdUnitId"] as? String ?? ""
+
+        let eventHandler = GAMRewardedAdEventHandler(adUnitID: gamAdUnitId)
+        eventHandler.adManagerRequestConfiguration = gamRequestConfiguration(args["customTargeting"])
+        let controls = FullscreenControls(args["controls"])
+        let adUnit: RewardedAdUnit
+        if let minSize = controls?.minSizePercentage {
+            adUnit = RewardedAdUnit(configID: configId, minSizePercentage: minSize, eventHandler: eventHandler)
+        } else {
+            adUnit = RewardedAdUnit(configID: configId, eventHandler: eventHandler)
+        }
+        controls?.apply(to: adUnit)
+        applyVideoParameters(args["videoParameters"], to: adUnit.videoParameters)
+        // Prebid iOS has no pbAdSlot setter on this ad unit: send it in the imp.
+        if let config = impOrtb(args["impOrtbConfig"] as? String, pbAdSlot: args["pbAdSlot"] as? String) {
+            adUnit.setImpORTBConfig(config)
+        }
+        if let config = args["globalOrtbConfig"] as? String { adUnit.setGlobalORTBConfig(config) }
+        adUnit.delegate = delegate
+        return adUnit
+    }
+}
